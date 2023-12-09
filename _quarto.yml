@@ -2,7 +2,7 @@ project:
   type: website
 
 website:
-  title: "PM566_Project_Real2"
+  title: "PM566 Final Project"
   navbar:
     left:
       - href: PM566_Midterm.qmd
