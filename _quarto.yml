@@ -1,0 +1,20 @@
+project:
+  type: website
+
+website:
+  title: "PM566_Project_Real2"
+  navbar:
+    left:
+      - href: PM566_Midterm.qmd
+        text: Home
+      - href: about.qmd
+        text: Download Report
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+
+editor: visual
+

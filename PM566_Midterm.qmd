@@ -1,0 +1,550 @@
+---
+title: "PM566 Final Project"
+author: "Sylwia Lipior"
+format: html
+embed-resources: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+# LA Galaxy U17 2022-2023 Season Game Data
+
+## Introduction
+
+Catapult devices, equipped with GPS and inertial sensors like accelerometers, gyroscopes, and magnetometers, are wearable tracking technologies used in sports for performance monitoring. These devices provide detailed data by mapping athlete movements across three axes, making them a powerful tool for performance decisions. Used by the LA Galaxy Sports Performance Department, Catapult data has been integral in assessing performance readiness, rehabilitation, and training. As a USC Sports Science student and intern at LA Galaxy, I have been involved in collecting this data since January 2023 for the U17 2022-2023 season. While the data is usually visualized using Catapult's Cloud or internal systems like Microsoft Azure, for this project, I've exported CSVs directly from Catapult for analysis. This study primarily focuses on evaluating how fatigue affects physical performance in soccer, specifically investigating variations in players' maximum velocities between the first and second halves of games, and including an analysis of physical performance of the MLS Next Tournament where the team had to play five games in seven days.
+
+### 
+
+```{r, echo=FALSE, include=FALSE}
+
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+
+
+
+# This is where I stored the downloaded CSVs from Catapult
+setwd("/Users/sylwialipior/Downloads/pm566-01-lab/U17 2022-2023 Data")
+
+# Get a list of all CSV files containing "_GD_"
+filenames <- list.files(pattern = "_GD_.*\\.csv$")
+```
+
+```{r, echo=FALSE, include=FALSE}
+
+setwd("/Users/sylwialipior/Downloads/pm566-01-lab/U17 2022-2023 Data")
+
+# List of desired variables
+desired_variables <- c(
+    "Player.Name", "Period.Name", "Period.Number", "Position.Name", 
+    "Total.Duration", "Total.Distance", "Total.Player.Load", 
+    "Player.Load.Per.Minute", "Player.Load.Per.Metre", "Meterage.Per.Minute", 
+    "Maximum.Velocity", "High.Speed.Distance.12mph.14mph", 
+    "Very.High.Speed.Distance.14mph.17mph", "Sprinting.Distance.17.19mph", 
+    "Supra.Max.Velocity..19mph", "Number.of.Sprints", 
+    "Velocity.Band.7.Average.Effort.Count", "Velocity.Band.8.Average.Effort.Count", 
+    "Max.Vel....Max.", "Profile.Max.Velocity", "Explosive.Efforts", 
+    "HSD.min", "Total.High.Intensity.Bouts..THIB.", "Maximal.High.Intensity.Bouts..MHIB.", 
+    "Accels..2.5...3.m.s.s.", "Accels..3...3.5.m.s.s.", "Accels....3.5.m.s.s.", 
+    "Decels...2.5....3.m.s.s", "Decels...3....3.5.m.s.s.", "Decels.....3.5.m.s.s.", 
+    "Acceleration.Density", "Acceleration.Density.Index"
+)
+
+#Function to read only columns of interest
+read_selected_columns <- function(filename) {
+    # Read the entire CSV
+    data <- read.csv(filename, skip = 9, header = TRUE, sep = ",")
+    
+    # Subset the data to keep only the desired columns
+    data <- data[, desired_variables, drop = FALSE]
+    
+    return(data)
+}
+
+# Function to extract and format the activity name from filename
+extract_activity_name <- function(filename) {
+    # Extract the part of the filename after U17 and before the file extension
+    name_part <- sub(".*U17_([^\\.]+)\\.csv$", "\\1", filename)
+    
+    # Replace underscores with spaces
+    activity_name <- gsub("_", " ", name_part)
+    
+    # Prepend "U17 " to the modified name
+    paste("U17", activity_name)
+}
+
+# Initialize an empty list to hold individual data frames
+data_frames <- list()
+
+# Loop through each file, read it, and add to the list
+for (filename in filenames) {
+    df <- read_selected_columns(filename)
+    
+    #Extract the activity name from the filename
+    activity_name <- extract_activity_name(filename)
+    
+    # Extract date information from the filename
+    date_string <- substr(filename, 1, 10) # Assuming the date is always the first 10 characters
+    date_obj <- as.Date(date_string, format = "%Y_%m_%d")
+    
+    # Add new columns for date and activity name
+    df$Date <- date_obj
+    df$Activity_Name <- activity_name
+    
+    data_frames[[filename]] <- df  # using filename as list name just for clarity, can use any     naming convention
+}
+
+# Combine all data frames into one master data frame
+master_df <- bind_rows(data_frames)
+
+## De-identifying the data
+# Generate a unique identifier for each player name
+unique_players <- unique(master_df$Player.Name)
+name_mapping <- data.frame(
+    Original_Name = unique_players,
+    Identifier = paste0("Player_", seq_along(unique_players))
+)
+
+# Replace the actual player names with the generated identifiers
+master_df$Player.Name <- name_mapping$Identifier[match(master_df$Player.Name, name_mapping$Original_Name)]
+
+
+```
+
+```{r, echo=FALSE, include=FALSE}
+
+# Extract month and year from the Date column to create a new 'Month' column
+master_df$Month <- format(master_df$Date, "%m")
+
+# List of unique months
+unique_months <- unique(master_df$Month)
+
+# # Loop through each month, create a plot, and then add a page break
+# for (month in unique_months) {
+#   sub_df <- master_df[master_df$Month == month, ]
+#   
+#   print(
+#     ggplot(sub_df, aes(x = Activity_Name, y = Maximum.Velocity, fill = Activity_Name)) +
+#       geom_boxplot() +
+#       theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+#       labs(title = paste("Max Speeds of Players for Month", month),
+#            x = "Activity",
+#            y = "Max Speed (mph)") +  
+#       theme(legend.position = "none")
+#   )
+#   
+#   # Add a page break after each plot
+#   cat("\\newpage")
+# }
+
+
+# Filter out the unwanted activities
+master_df <- master_df %>%
+  filter(!(Activity_Name %in% c("U17 GD vs RSL", "U17 GD Pre Season Day 2")))
+
+
+```
+
+## Interactive Metric vs Player Load Plot
+
+For some more initial visualization, I decided to look at the relationship between "Player Load", which is defined by Catapult as "the sum of the accelerations across all axes of the internal tri-axial accelerometer during movement", and a few other physical metrics. Specifically, I looked at scatterplot of Player Load vs Total Distance Covered, Total Number of Sprints, Explosive Efforts, and Total High Intensity Bouts. These interactive plots allow you to see which player each data point corresponds to and their exact values. As shown by these graphs, there is a strong positive correlation between Player Load and all examined physical metrics.
+
+```{r, echo=FALSE}
+
+library(plotly)
+library(dplyr)
+
+# Filter data for when Period.Name is "Session"
+filtered_df <- master_df %>% 
+               filter(Period.Name == "Session")
+
+# Create a plot for Total.Distance
+plot_distance <- plot_ly(data = filtered_df, x = ~Total.Player.Load, y = ~Total.Distance,
+                         type = 'scatter', mode = 'markers', 
+                         color = ~Player.Name, text = ~Player.Name,
+                         hoverinfo = 'text+x+y') %>%
+  layout(title = "Scatterplot of Player Load vs. Distance Covered",
+         xaxis = list(title = "Total Player Load"),
+         yaxis = list(title = "Total Distance"),
+         showlegend = FALSE)
+
+# Create a plot for Number.of.Sprints
+plot_sprints <- plot_ly(data = filtered_df, x = ~Total.Player.Load, y = ~Number.of.Sprints,
+                        type = 'scatter', mode = 'markers', 
+                        color = ~Player.Name, text = ~Player.Name,
+                        hoverinfo = 'text+x+y') %>%
+  layout(title = "Scatterplot of Player Load vs. Total Number of Sprints",
+         xaxis = list(title = "Total Player Load"),
+         yaxis = list(title = "Total Number of Sprints"),
+         showlegend = FALSE)
+
+# Create a plot for Explosive.Efforts
+plot_explosive <- plot_ly(data = filtered_df, x = ~Total.Player.Load, y = ~Explosive.Efforts,
+                          type = 'scatter', mode = 'markers', 
+                          color = ~Player.Name, text = ~Player.Name,
+                          hoverinfo = 'text+x+y') %>%
+  layout(title = "Scatterplot of Player Load vs. Explosive Efforts",
+         xaxis = list(title = "Total Player Load"),
+         yaxis = list(title = "Explosive Efforts"),
+         showlegend = FALSE)
+
+# Create a plot for Total.High.Intensity.Bouts..THIB.
+plot_high_intensity <- plot_ly(data = filtered_df, x = ~Total.Player.Load, y = ~`Total.High.Intensity.Bouts..THIB.`,
+                               type = 'scatter', mode = 'markers', 
+                               color = ~Player.Name, text = ~Player.Name,
+                               hoverinfo = 'text+x+y') %>%
+  layout(title = "Scatterplot of Player Load vs. Total High Intensity Bouts",
+         xaxis = list(title = "Total Player Load"),
+         yaxis = list(title = "Total High Intensity Bouts"),
+         showlegend = FALSE)
+
+# Display the plots (you can also save them as HTML if needed)
+plot_distance
+plot_sprints
+plot_explosive
+plot_high_intensity
+
+```
+
+## Maximum Velocity Analysis
+
+A lot of my analysis was focused around looking at individual player's high speeds. Here are some graphs showing highest velocities per player. The table shows how many times each player appeared in the Top 3 for highest speeds for each match.
+
+```{r, echo=FALSE}
+
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+# Mutate new variable based on criteria
+master_df <- master_df %>%
+  mutate(Period.Name.Halves = case_when(
+    Period.Name %in% c("1st Half", "0- 10 min", "10-45min", "0-15mins", "15-30mins", "30-45mins") ~ "First Half",
+    Period.Name %in% c("2nd Half", "45-60mins", "60-70mins", "70-90mins", "45-70mins", "70-75mins", 
+                       "75-90mins", "66-80min", "80-85min", "85-90min", "45-50mins", "50-65mins", "60-75mins",
+                       "45-75mins", "75-83min", "83-90min", "45-55mins", "55-60mins", "60-72mins", "72-90mins",
+                       "56-60mins", "55-70mins", "70-77mins", "77-90mins", "70-74mins", "74-83mins", "83-90mins",
+                       "60-69mins", "69-77mins", "77-83mins", "75-78mins", "78-85mins", "85-90mins", "75-80mins",
+                       "80-90mins", "45-58mins", "58-75mins", "70-85mins", "60-65mins", "60-68mins", "68-80mins") ~ "Second Half",
+    TRUE ~ Period.Name  # keeps original period names for the rest
+  ))
+
+
+# Filter the dataset to retain only the maximum velocity observation per player, per activity, and per half
+filtered_max_speed_df <- master_df %>%
+    # Remove Goal Keeper data since they would skew the data
+    filter(Position.Name != "Goal Keeper") %>%
+    # Retain only observations where Maximum.Velocity is at least 10
+  filter(Maximum.Velocity >= 10) %>%
+  group_by(Player.Name, Activity_Name, Period.Name.Halves) %>%
+  filter(Maximum.Velocity == max(Maximum.Velocity, na.rm = TRUE)) %>%
+  ungroup()
+
+
+# Filter data to include only rows where Period.Name.Halves is "First Half" or "Second Half"
+filtered_df_halves <- filtered_max_speed_df %>% filter(Period.Name.Halves %in% c("First Half", "Second Half"))
+
+# # Boxplot comparing max speed between the two halves
+# ggplot(filtered_df_halves, aes(x = Period.Name.Halves, y = Maximum.Velocity, fill = Period.Name.Halves)) +
+#   geom_boxplot() +
+#   labs(title = "Comparison of Max Speed in First Half vs Second Half",
+#        x = "Half",
+#        y = "Max Speed (mph)") +  
+#   theme(legend.position = "none")
+
+
+# Group by Activity and Period.Name.Halves, then find the top 3 players by maximum velocity
+top_players_by_activity <- filtered_df_halves %>%
+  group_by(Activity_Name, Period.Name.Halves) %>%
+  top_n(3, Maximum.Velocity) %>%
+  ungroup()
+
+# Count the number of times each player is in the top 3 for the first half
+player_counts_first_half <- top_players_by_activity %>%
+  filter(Period.Name.Halves == "First Half") %>%  # filter for "First Half" only
+  group_by(Player.Name, Period.Name.Halves) %>%
+  summarise(Times_in_Top_3 = n()) %>%
+  arrange(desc(Times_in_Top_3), Player.Name)
+
+# Count the number of times each player is in the top 3 for the first half
+player_counts_second_half <- top_players_by_activity %>%
+  filter(Period.Name.Halves == "Second Half") %>%
+  group_by(Player.Name, Period.Name.Halves) %>%
+  summarise(Times_in_Top_3 = n()) %>%
+  arrange(desc(Times_in_Top_3), Player.Name)
+
+player_counts_both_halves <- cbind(player_counts_first_half, player_counts_second_half)
+player_counts_both_halves <- player_counts_both_halves[1:10,]
+
+column_names <- c('Player Name', 'Half', 'Times in Top 3', 'Player Name', 'Half', 'Times in Top 3')
+
+knitr::kable(player_counts_both_halves, col.names = column_names) %>%
+  kable_styling(full_width = F, position = "center",
+                latex_options = c("striped", "scale_down"))
+
+# Extract top 5 player names for each half
+top_5_names_first <- player_counts_first_half$Player.Name[1:5]
+top_5_names_second <- player_counts_second_half$Player.Name[1:5]
+
+# Combine and get unique names
+top_5_names_combined <- unique(c(top_5_names_first, top_5_names_second))
+
+# Filter original data
+filtered_first_half <- player_counts_first_half %>% filter(Player.Name %in% top_5_names_first)
+filtered_second_half <- player_counts_second_half %>% filter(Player.Name %in% top_5_names_second)
+
+# Combine the data
+combined_filtered_data <- rbind(filtered_first_half, filtered_second_half)
+
+# Create the bar chart
+ggplot(combined_filtered_data, aes(x = Period.Name.Halves, y = Times_in_Top_3, fill = Player.Name)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Top 5 Players Who Appeared in Top 3 Max Speeds by Half",
+       x = "Half",
+       y = "Times in Top 3") +
+  theme_minimal()
+
+
+# Extract top speeds for each player and each half
+top_speeds_by_half <- filtered_df_halves %>%
+  group_by(Player.Name) %>%
+  summarise(
+    `First Half Speed` = max(Maximum.Velocity[Period.Name.Halves == "First Half"], na.rm = TRUE),
+    `Second Half Speed` = max(Maximum.Velocity[Period.Name.Halves == "Second Half"], na.rm = TRUE)
+  )
+
+melted_data <- top_speeds_by_half %>%
+  gather(key = "Half", value = "Speed", `First Half Speed`, `Second Half Speed`)
+
+# # Spaghetti plot of best first half speed and best second half speed by player
+# ggplot(melted_data, aes(x = Half, y = Speed, group = Player.Name, color = Player.Name)) +
+#   geom_line(size = 0.5) +
+#   geom_point(size = 3) +
+#   labs(title = "Top Observed Velocity: First Half vs Second Half",
+#        x = "Game Half",
+#        y = "Top Velocity") +
+#   theme(legend.position = "none")
+
+
+# avg_speed_by_half <- filtered_df_halves %>%
+#   group_by(Player.Name, Period.Name.Halves) %>%
+#   summarise(Average.Velocity = mean(Maximum.Velocity, na.rm = TRUE)) %>%
+#   ungroup()
+# 
+# melted_avg_data <- avg_speed_by_half %>%
+#   pivot_longer(cols = Average.Velocity, names_to = "Attribute", values_to = "Speed")
+# 
+# # Create the spaghetti plot
+# ggplot(melted_avg_data, aes(x = Period.Name.Halves, y = Speed, group = Player.Name, color = Player.Name)) +
+#   geom_line(size = 0.5) +
+#   geom_point(size = 3) +
+#   labs(title = "Average Observed Velocity: First Half vs Second Half",
+#        x = "Game Half",
+#        y = "Average Velocity") +
+#   theme(legend.position = "none")
+
+
+
+
+```
+
+## Summary Table and Bar Charts for MLS Next Tournament Matches
+
+The U17 Team Played 5 matches within 7 days in June 2023 in order to lift the MLS Next trophy. They played in hot and humid conditions in Texas. Here is a summary of their physical performance in these matches.
+
+```{r, echo=FALSE, result = 'asis'}
+
+
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+filtered_df_2023_06 <- master_df %>%
+    # Remove Goal Keeper data since they would skew the data
+    filter(Position.Name != "Goal Keeper") %>%
+  filter(str_detect(Date, "^2023-06"))
+
+# Filtering and aggregating data
+team_metrics_by_game <- filtered_df_2023_06 %>%
+  filter(Period.Name.Halves %in% c("First Half", "Second Half")) %>%
+  group_by(Activity_Name) %>%
+  summarise(
+    Game_Date = min(Date),  # Assuming 'Activity_Date' contains the date of the game
+    Total_Distance = sum(Total.Distance, na.rm = TRUE),
+    Total_High_Intensity_Bouts = sum(Total.High.Intensity.Bouts..THIB., na.rm = TRUE),
+    Total_Player_Load = sum(Total.Player.Load, na.rm = TRUE),
+    Total_Explosive_Efforts = sum(Explosive.Efforts, na.rm = TRUE),
+    Total_Sprints = sum(Number.of.Sprints, na.rm = TRUE),
+    Total_High_Speed_Distance = sum(High.Speed.Distance.12mph.14mph, na.rm = TRUE),
+    Total_Very_High_Speed_Distance = sum(Very.High.Speed.Distance.14mph.17mph, na.rm = TRUE),
+    Total_Sprinting_Distance = sum(Sprinting.Distance.17.19mph, na.rm = TRUE),
+    Total_Supra_Velocity_Distance = sum(Supra.Max.Velocity..19mph, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  arrange(Game_Date)  # Arrange data by the game date in chronological order
+
+
+team_metrics_by_game$Activity_Name <- factor(team_metrics_by_game$Activity_Name, levels = team_metrics_by_game$Activity_Name[order(team_metrics_by_game$Game_Date)])
+
+# Create a table with all our sums
+# Custom column names
+custom_colnames <- gsub("_", " ", names(team_metrics_by_game))
+
+
+
+knitr::kable(team_metrics_by_game, col.names = custom_colnames, formal = 'html') %>% 
+    kable_styling(full_width = F, position = "center",
+                latex_options = c("striped", "scale_down"))
+           
+
+# Plotting Total Distance
+ggplot(team_metrics_by_game, aes(x = Activity_Name, y = Total_Distance, fill = Activity_Name)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(title = "Total Distance Covered for Each Game",
+       x = "Game",
+       y = "Total Distance") +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+# # Plotting Total High Intensity Bouts
+# ggplot(team_metrics_by_game, aes(x = Activity_Name, y = Total_High_Intensity_Bouts, fill = Activity_Name)) +
+#   geom_bar(stat = "identity") +
+#   scale_fill_brewer(palette = "Set3") +
+#   labs(title = "Total High Intensity Bouts for Each Game",
+#        x = "Game",
+#        y = "Total High Intensity Bouts") +
+#   theme_minimal() +
+#   theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# # Plotting Total Sprints
+# ggplot(team_metrics_by_game, aes(x = Activity_Name, y = Total_Sprints, fill = Activity_Name)) +
+#   geom_bar(stat = "identity") +
+#   scale_fill_brewer(palette = "Set3") +
+#   labs(title = "Total Sprints for Each Game",
+#        x = "Game",
+#        y = "Total Sprints") +
+#   theme_minimal() +
+#   theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# # Plotting Total Explosive Efforts
+# ggplot(team_metrics_by_game, aes(x = Activity_Name, y = Total_Explosive_Efforts, fill = Activity_Name)) +
+#   geom_bar(stat = "identity") +
+#   scale_fill_brewer(palette = "Set3") +
+#   labs(title = "Total Explosive Efforts for Each Game",
+#        x = "Game",
+#        y = "Total Explosive Efforts") +
+#   theme_minimal() +
+#   theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plotting Total Player Load with a different color palette
+ggplot(team_metrics_by_game, aes(x = Activity_Name, y = Total_Player_Load, fill = Activity_Name)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set3") +
+  scale_fill_brewer(palette = "Set3") +  # Change this to apply different palettes
+  labs(title = "Total Player Load for Each Game",
+       x = "Game",
+       y = "Total Player Load") +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+```
+
+### 
+
+## Interactive Sprint Distance and Physical Metrics Graphs
+
+Here is an interactive graph showing the breakdown of distance covered at different speeds throughout the MLS Next Tournament, as well as match totals for physical metrics.
+
+```{r, echo=FALSE}
+
+
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+filtered_df_2023_06 <- master_df %>%
+    # Remove Goal Keeper data since they would skew the data
+    filter(Position.Name != "Goal Keeper") %>%
+  filter(str_detect(Date, "^2023-06"))
+
+# Filtering and aggregating data
+team_metrics_by_game <- filtered_df_2023_06 %>%
+  filter(Period.Name.Halves %in% c("First Half", "Second Half")) %>%
+  group_by(Activity_Name) %>%
+  summarise(
+    Game_Date = min(Date),  # Assuming 'Activity_Date' contains the date of the game
+    Total_Distance = sum(Total.Distance, na.rm = TRUE),
+    Total_High_Intensity_Bouts = sum(Total.High.Intensity.Bouts..THIB., na.rm = TRUE),
+    Total_Player_Load = sum(Total.Player.Load, na.rm = TRUE),
+    Total_Explosive_Efforts = sum(Explosive.Efforts, na.rm = TRUE),
+    Total_Sprints = sum(Number.of.Sprints, na.rm = TRUE),
+    Total_High_Speed_Distance = sum(High.Speed.Distance.12mph.14mph, na.rm = TRUE),
+    Total_Very_High_Speed_Distance = sum(Very.High.Speed.Distance.14mph.17mph, na.rm = TRUE),
+    Total_Sprinting_Distance = sum(Sprinting.Distance.17.19mph, na.rm = TRUE),
+    Total_Supra_Velocity_Distance = sum(Supra.Max.Velocity..19mph, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  arrange(Game_Date)  # Arrange data by the game date in chronological order
+
+
+team_metrics_by_game$Activity_Name <- factor(team_metrics_by_game$Activity_Name, levels = team_metrics_by_game$Activity_Name[order(team_metrics_by_game$Game_Date)])
+
+library(plotly)
+library(ggplot2)
+
+# Your ggplot2 stacked bar chart
+p <- ggplot(team_metrics_by_game, aes(x = Activity_Name)) +
+  geom_bar(aes(y = Total_High_Speed_Distance, fill = "High Speed Distance (12-14mph)"), stat = "identity") +
+  geom_bar(aes(y = Total_Very_High_Speed_Distance, fill = "Very High Speed Distance (14-17mph)"), stat = "identity", position = "stack") +
+  geom_bar(aes(y = Total_Sprinting_Distance, fill = "Sprinting Distance (17-19mph)"), stat = "identity", position = "stack") +
+  geom_bar(aes(y = Total_Supra_Velocity_Distance, fill = "Supra Sprinting Distance (>19mph)"), stat = "identity", position = "stack") +
+  labs(title = "Distribution of Speed Ranges for Each Game",
+       x = "Game",
+       y = "Total Distance",
+       fill = "Sprinting Speed") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("High Speed Distance (12-14mph)" = "pink",
+                               "Very High Speed Distance (14-17mph)" = "orange",
+                               "Sprinting Distance (17-19mph)" = "red",
+                               "Supra Sprinting Distance (>19mph)" = "purple"))
+
+# Convert to a plotly interactive plot
+p_interactive <- ggplotly(p)
+
+# If you want to display the plot in an R environment (like RStudio)
+p_interactive
+
+d <- ggplot(team_metrics_by_game, aes(x = Activity_Name)) +
+  geom_bar(aes(y = Total_High_Intensity_Bouts, fill = "Total High Intensity Bouts"), stat = "identity") +
+  geom_bar(aes(y = Total_Sprints, fill = "Total Sprints"), stat = "identity", position = "stack") +
+  geom_bar(aes(y = Total_Explosive_Efforts, fill = "Total Explosive Efforts"), stat = "identity", position = "stack") +
+  labs(title = "Metrics for Each Game",
+       x = "Game",
+       y = "Value",
+       fill = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("Total High Intensity Bouts" = "blue",
+                               "Total Sprints" = "green",
+                               "Total Explosive Efforts" = "red"))
+
+# Convert to a plotly interactive plot
+d_interactive <- ggplotly(d)
+
+# Display the plot
+d_interactive
+
+```
